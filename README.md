@@ -53,8 +53,11 @@ https://t.me/userinfobot
         [Для логирования запросов]
 
 openai_compatible.py    -   ФАЙЛ
+
 resp.text - bot's answer    -   ПЕРЕМЕННАЯ С ВОЗВРАЩАЕМЫМ ОТВЕТОМ
+
 payload - user's message    -   ПЕРЕМЕННАЯ С ЗАПРОСОМ ПОЛЬЗОВАТЕЛЯ
+
 
 
 
