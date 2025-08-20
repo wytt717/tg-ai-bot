@@ -64,16 +64,24 @@ payload - user's message    -   ПЕРЕМЕННАЯ С ЗАПРОСОМ ПОЛ�
 
 
 
-
         [СТРУКТУРА ПРОЕКТА]
-├── README.md       -       (ДОКУМЕНТАЦИЯ + ЗАДАНИЯИ)
+
+├── README.md       -       (ДОКУМЕНТАЦИЯ + ЗАДАНИЯ)
+
 ├── requirements.txt    -   (ЗАВИСИМОСТИ)
+
 └── src
+
     ├── __init__.py     -   (ДЛЯ РАБОТЫ МОДУЛЯ)
+
     ├── __pycache__
+
     │   ├── __init__.cpython-312.pyc
+
     │   ├── _debug_ai.cpython-312.pyc
+
     │   ├── bot.cpython-312.pyc
+    
     │   └── config.cpython-312.pyc
     ├── _debug_ai.py    -   (проверки работы  подключения к OpenAI-совместимому API)
     ├── ai_providers  
