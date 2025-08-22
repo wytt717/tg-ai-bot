@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 
 load_dotenv()  # загрузит .env из корня репозитория
 
-ALLOWED_USERS = {996208453, 580510842} 
+ALLOWED_USERS = list(map(int, os.getenv("ALLOWED_USERS", "").split(",")))
 
 # 996208453 - main
 # 580510842 - Ali

@@ -1,16 +1,10 @@
-from telegram import (
-    Update,
-    ReplyKeyboardMarkup,
-    KeyboardButton
-)
-from telegram.ext import (
-    ContextTypes,
-    CommandHandler,
-    MessageHandler,
-    filters
-)
-from src.config import ALLOWED_USERS
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import ContextTypes, CommandHandler, MessageHandler, filters
+
+from src.utils.access import deny_if_not_allowed
 from src.ai_providers.openai_compatible import ask_ai
+
+import logging
 
 try:
     from src.utils.memory import user_memory
@@ -22,36 +16,35 @@ try:
 except ImportError:
     split_text = None
 
-
-# Храним состояние включён/выключен ИИ для каждого пользователя
+# Храним состояние включён/выключен ИИ по пользователю
 _user_ai_enabled = {}
 
+async def cmd_start(update, context):
+    uid = update.effective_user.id
+
+    if uid not in _user_ai_enabled:
+        _user_ai_enabled[uid] = False
+
+    await update.message.reply_text(
+        "Привет!",
+        reply_markup=_main_menu(_user_ai_enabled[uid])
+    )
 
 def _main_menu(ai_on: bool) -> ReplyKeyboardMarkup:
     kb = [
-        [KeyboardButton("Запуск бота")],
-        [KeyboardButton("Помощь")],
+        [KeyboardButton("Запустить бота")],
+        # [KeyboardButton("/help")],
         [KeyboardButton("🛑 Выключить ИИ") if ai_on else KeyboardButton("🤖 Включить ИИ")],
         [KeyboardButton("⚙ Настройки"), KeyboardButton("❓ Помощь")]
     ]
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
-
 def _settings_menu() -> ReplyKeyboardMarkup:
     kb = [[KeyboardButton("🔙 Назад")]]
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
-
-async def _deny_if_not_allowed(update: Update) -> bool:
-    if update.effective_user.id not in ALLOWED_USERS:
-        await update.message.reply_text("⛔ У вас нет доступа к этому боту.")
-        return True
-    return False
-
-
-# ---------- Хендлеры ----------
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await _deny_if_not_allowed(update):
+    if await deny_if_not_allowed(update):
         return
     _user_ai_enabled[update.effective_user.id] = False
     await update.message.reply_text(
@@ -59,9 +52,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=_main_menu(False)
     )
 
-
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await _deny_if_not_allowed(update):
+    if await deny_if_not_allowed(update):
         return
 
     uid = update.effective_user.id
@@ -94,7 +86,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Сначала включи ИИ через меню.")
         return
 
-    # --- Работа с памятью пользователя ---
+    # Память диалога (если есть)
     context_data = None
     if user_memory:
         try:
@@ -103,11 +95,13 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-    # --- Запрос к ИИ ---
+    # Вызов ИИ
     try:
-        answer = await ask_ai(user_text=text, user_id=uid, context=context_data)
+        answer = await ask_ai(user_text=text)
     except TypeError:
         answer = await ask_ai(text)
+    except Exception:
+        answer = "⚠ Не удалось получить ответ от ИИ. Попробуй позже."
 
     if user_memory and answer:
         try:
@@ -124,8 +118,6 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(answer)
 
-
-# ---------- Регистрация в приложении ----------
 def register_handlers(app):
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler))

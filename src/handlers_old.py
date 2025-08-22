@@ -1,21 +1,15 @@
-import logging
-import asyncio
 from telegram import (
     Update,
     ReplyKeyboardMarkup,
     KeyboardButton
 )
 from telegram.ext import (
-    ApplicationBuilder,
+    ContextTypes,
     CommandHandler,
     MessageHandler,
-    ContextTypes,
     filters
 )
-
-from src.handlers.commands import register_handlers
-
-from src.config import TELEGRAM_BOT_TOKEN, ALLOWED_USERS
+from src.config import ALLOWED_USERS
 from src.ai_providers.openai_compatible import ask_ai
 
 try:
@@ -29,23 +23,14 @@ except ImportError:
     split_text = None
 
 
-# Логирование
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
-)
-logger = logging.getLogger("tg-ai-bot")
-
-
-# Состояние ИИ для каждого пользователя
+# Храним состояние включён/выключен ИИ для каждого пользователя
 _user_ai_enabled = {}
 
 
-# ---------- Меню ----------
 def _main_menu(ai_on: bool) -> ReplyKeyboardMarkup:
     kb = [
-        [KeyboardButton("/start")],
-        [KeyboardButton("/help")],
+        [KeyboardButton("Запуск бота")],
+        [KeyboardButton("Помощь")],
         [KeyboardButton("🛑 Выключить ИИ") if ai_on else KeyboardButton("🤖 Включить ИИ")],
         [KeyboardButton("⚙ Настройки"), KeyboardButton("❓ Помощь")]
     ]
@@ -66,8 +51,9 @@ async def _deny_if_not_allowed(update: Update) -> bool:
 
 # ---------- Хендлеры ----------
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await _deny_if_not_allowed(update):
+    if await deny_if_not_allowed(update):
         return
+
     uid = update.effective_user.id
 
     # Если пользователя ещё нет в словаре — инициализируем
@@ -80,6 +66,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Привет, {update.effective_user.first_name}! 👋\nВыбери действие:",
         reply_markup=_main_menu(ai_on)  # ← теперь берём реальное состояние
     )
+
 
 
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -127,7 +114,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # --- Запрос к ИИ ---
     try:
-        answer = await ask_ai(user_text=text)
+        answer = await ask_ai(user_text=text, user_id=uid, context=context_data)
     except TypeError:
         answer = await ask_ai(text)
 
@@ -147,27 +134,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(answer)
 
 
-# ---------- Запуск ----------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
-)
-logger = logging.getLogger("tg-ai-bot")
-
-def main():
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-
-    # Регистрируем хендлеры централизованно
-    register_handlers(app)
-
-    logger.info("Бот запущен. Ожидаю сообщения...")
-    app.run_polling()
-
-
-if __name__ == "__main__":
-    try:
-        import uvloop
-        uvloop.install()
-    except ImportError:
-        pass
-    main()
+# ---------- Регистрация в приложении ----------
+def register_handlers(app):
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler))
