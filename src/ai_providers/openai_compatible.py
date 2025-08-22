@@ -81,3 +81,16 @@ class OpenAICompatibleClient:
             resp.raise_for_status()
             data = resp.json()
             return data["choices"][0]["message"]["content"].strip()
+        
+    # ... весь твой текущий код остаётся без изменений выше ...
+
+# Инициализируем клиент один раз
+_client = OpenAICompatibleClient(OPENAI_BASE_URL, OPENAI_API_KEY)
+
+async def ask_ai(user_text: str) -> str:
+    """
+    Универсальная функция для запроса к AI.
+    Совместима с импортом из handlers.py.
+    """
+    return await _client.chat(OPENAI_MODEL, user_text)
+
