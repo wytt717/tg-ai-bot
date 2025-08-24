@@ -9,3 +9,5 @@ __pycache__/
 # Editors
 .idea/
 .vscode/
+# readmne
+.README.md
