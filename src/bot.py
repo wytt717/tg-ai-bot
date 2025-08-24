@@ -37,24 +37,7 @@ logging.basicConfig(
 logger = logging.getLogger("tg-ai-bot")
 
 
-# Состояние ИИ для каждого пользователя
-_user_ai_enabled = {}
 
-
-# ---------- Меню ----------
-def _main_menu(ai_on: bool) -> ReplyKeyboardMarkup:
-    kb = [
-        [KeyboardButton("/start")],
-        [KeyboardButton("/help")],
-        [KeyboardButton("🛑 Выключить ИИ") if ai_on else KeyboardButton("🤖 Включить ИИ")],
-        [KeyboardButton("⚙ Настройки"), KeyboardButton("❓ Помощь")]
-    ]
-    return ReplyKeyboardMarkup(kb, resize_keyboard=True)
-
-
-def _settings_menu() -> ReplyKeyboardMarkup:
-    kb = [[KeyboardButton("🔙 Назад")]]
-    return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
 
 async def _deny_if_not_allowed(update: Update) -> bool:
@@ -63,88 +46,6 @@ async def _deny_if_not_allowed(update: Update) -> bool:
         return True
     return False
 
-
-# ---------- Хендлеры ----------
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await _deny_if_not_allowed(update):
-        return
-    uid = update.effective_user.id
-
-    # Если пользователя ещё нет в словаре — инициализируем
-    if uid not in _user_ai_enabled:
-        _user_ai_enabled[uid] = False
-
-    ai_on = _user_ai_enabled[uid]
-
-    await update.message.reply_text(
-        f"Привет, {update.effective_user.first_name}! 👋\nВыбери действие:",
-        reply_markup=_main_menu(ai_on)  # ← теперь берём реальное состояние
-    )
-
-
-async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await _deny_if_not_allowed(update):
-        return
-
-    uid = update.effective_user.id
-    text = (update.message.text or "").strip()
-    ai_on = _user_ai_enabled.get(uid, False)
-
-    if text == "🤖 Включить ИИ":
-        _user_ai_enabled[uid] = True
-        await update.message.reply_text("ИИ включён ✅. Пиши запросы.", reply_markup=_main_menu(True))
-        return
-
-    if text == "🛑 Выключить ИИ":
-        _user_ai_enabled[uid] = False
-        await update.message.reply_text("ИИ выключен ❌.", reply_markup=_main_menu(False))
-        return
-
-    if text == "⚙ Настройки":
-        await update.message.reply_text("Раздел настроек:", reply_markup=_settings_menu())
-        return
-
-    if text == "❓ Помощь":
-        await update.message.reply_text("Нажми «Включить ИИ», чтобы получать ответы.")
-        return
-
-    if text == "🔙 Назад":
-        await update.message.reply_text("Главное меню:", reply_markup=_main_menu(ai_on))
-        return
-
-    if not ai_on:
-        await update.message.reply_text("Сначала включи ИИ через меню.")
-        return
-
-    # --- Работа с памятью пользователя ---
-    context_data = None
-    if user_memory:
-        try:
-            user_memory.add_message(uid, "user", text)
-            context_data = user_memory.get_context(uid)
-        except Exception:
-            pass
-
-    # --- Запрос к ИИ ---
-    try:
-        answer = await ask_ai(user_text=text)
-    except TypeError:
-        answer = await ask_ai(text)
-
-    if user_memory and answer:
-        try:
-            user_memory.add_message(uid, "assistant", answer)
-        except Exception:
-            pass
-
-    if not answer:
-        answer = "Не удалось получить ответ. Попробуй ещё раз позже."
-
-    if split_text:
-        for part in split_text(answer):
-            await update.message.reply_text(part)
-    else:
-        await update.message.reply_text(answer)
 
 
 # ---------- Запуск ----------
