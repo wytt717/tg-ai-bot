@@ -2,15 +2,10 @@ import logging
 import asyncio
 from telegram import (
     Update,
-    ReplyKeyboardMarkup,
-    KeyboardButton
 )
 from telegram.ext import (
     ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters
+
 )
 
 from src.handlers.commands import register_handlers
@@ -37,15 +32,11 @@ logging.basicConfig(
 logger = logging.getLogger("tg-ai-bot")
 
 
-
-
-
 async def _deny_if_not_allowed(update: Update) -> bool:
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("⛔ У вас нет доступа к этому боту.")
         return True
     return False
-
 
 
 # ---------- Запуск ----------

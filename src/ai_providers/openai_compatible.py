@@ -84,13 +84,19 @@ class OpenAICompatibleClient:
         
     # ... весь твой текущий код остаётся без изменений выше ...
 
+
 # Инициализируем клиент один раз
 _client = OpenAICompatibleClient(OPENAI_BASE_URL, OPENAI_API_KEY)
 
-async def ask_ai(user_text: str) -> str:
+async def ask_ai(
+    user_text: str,
+    model: str = OPENAI_MODEL,
+    temperature: float = 0.7
+) -> str:
     """
-    Универсальная функция для запроса к AI.
-    Совместима с импортом из handlers.py.
+    Отправляет запрос в AI с учётом переданных параметров.
+    Настройки (model, temperature) должны передаваться из хендлера.
     """
-    return await _client.chat(OPENAI_MODEL, user_text)
+    return await _client.chat(model, _messages(user_text), temperature=temperature)
+
 

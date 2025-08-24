@@ -1,0 +1,9 @@
+{
+  "996208453": {
+    "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+    "temp": 0.7,
+    "history": true,
+    "lang": "RU",
+    "theme": "light"
+  }
+}
