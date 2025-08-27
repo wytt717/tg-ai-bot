@@ -302,7 +302,11 @@ async def handle_ai_request(update, uid, text):
         for part in split_text(answer):
             await update.message.reply_text(part)
     else:
-        await update.message.reply_text(answer)
+        formatted_answer = f"*Ответ ИИ:*\n\n_{answer}_"
+        await update.message.reply_text(
+            formatted_answer,
+            parse_mode="MarkdownV2"
+)
 
     # Память диалога (если есть)
     context_data = None
@@ -336,10 +340,48 @@ async def handle_ai_request(update, uid, text):
     else:
         await update.message.reply_text(answer)
 
-# ====== ОБРАБОТЧИК МЕНЮ ======
+# 📌 Форматирование ответа
+def format_ai_answer(text: str, icon: str = "🤖") -> str:
+    return (
+        f"<b>{icon}</b>\n"
+        f"<pre>{text}</pre>\n"
+        f"<i>— </i>"
+    )
+
+# 📌 Автоподбор иконки по теме
+def choose_icon_by_topic(user_text: str) -> str:
+    topics = {
+        "код": "💻",
+        "python": "🐍",
+        "рецепт": "🍳",
+        "погода": "☀️",
+        "шутка": "😂",
+        "новости": "📰"
+    }
+    for key, icon in topics.items():
+        if key in user_text.lower():
+            return icon
+    return "🤖"
+
+# 📌 Основной обработчик
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await deny_if_not_allowed(update):
-        return
+    user_message = update.message.text
+    icon = choose_icon_by_topic(user_message)
+
+    # Получаем ответ от ИИ
+    answer = await ask_ai(user_message)
+
+    # Форматируем
+    formatted_text = format_ai_answer(answer, icon)
+
+    # Если сообщение в пределах лимита — отправляем целиком
+    if len(formatted_text) <= 4000:
+        await update.message.reply_text(formatted_text, parse_mode="HTML")
+    else:
+        # Если очень длинный ответ — режем на куски
+        for i in range(0, len(formatted_text), 4000):
+            await update.message.reply_text(formatted_text[i:i+4000], parse_mode="HTML")
+
 
     uid = update.effective_user.id
     text = (update.message.text or "").strip()
@@ -422,11 +464,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ✅ Форматируем ответ
     answer = format_ai_response(answer)
 
-    if split_text:
-        for part in split_text(answer):
-            await update.message.reply_text(part, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
-    else:
-        await update.message.reply_text(answer, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+    
 
 def register_handlers(app):
     app.add_handler(CommandHandler("start", cmd_start))
