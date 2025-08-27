@@ -15,7 +15,7 @@ def require_env(name: str) -> str:
     return val
 
 # Обязательные переменные
-OPENAI_API_KEY = require_env("OPENAI_API_KEY")
+OPENAI_API_KEYS = require_env("OPENAI_API_KEYS")
 
 # Можно оставить по умолчанию официальный API, если не используешь локальный/совместимый
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
@@ -43,7 +43,7 @@ def env_int(key: str, default: int) -> int:
         return default
 
 TELEGRAM_BOT_TOKEN = env_str("TELEGRAM_BOT_TOKEN", required=True)
-API_KEY = env_str("OPENAI_API_KEY", required=True)
+API_KEY = env_str("OPENAI_API_KEYS", required=True)
 BASE_URL = env_str("BASE_URL", "https://api.groq.com/openai/v1")
 MODEL = env_str("MODEL", "llama-3.1-70b-versatile")
 TEMPERATURE = env_float("TEMPERATURE", 0.7)
