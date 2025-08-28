@@ -16,76 +16,247 @@ except ImportError:
 
 from telegram.constants import ParseMode  # ✅ для HTML форматирования
 
+import re
+from telegram.constants import ParseMode
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler
-import json
+
 # Храним состояние включён/выключен ИИ по пользователю
 _user_ai_enabled = {}
+_user_settings = {}  # user_id -> {"model": "...", "lang": "...", "spec": "..."}
+
+_last_ai_response = {}  # user_id -> {"text": str, "msg_id": int}
+
+callback_data="menu_open_from_dialog"
 
 
-
-import os
-
-
-from src.ai_providers.openai_compatible import ask_ai
-
-def _inline_main_menu(ai_on: bool) -> InlineKeyboardMarkup:
+def _inline_main_menu(user_id: int) -> InlineKeyboardMarkup:
+    ai_on = _user_ai_enabled.get(user_id, False)
+    settings = _user_settings.get(user_id, {"model": "—", "lang": "—", "spec": "—"})
     kb = [
         [InlineKeyboardButton("🚀 Запустить бота", callback_data="start_bot")],
         [InlineKeyboardButton("🛑 Выключить ИИ" if ai_on else "🤖 Включить ИИ", callback_data="toggle_ai")],
         [
             InlineKeyboardButton("⚙ Настройки", callback_data="settings"),
             InlineKeyboardButton("❓ Помощь", callback_data="help")
-        ]
+        ],
+
     ]
     return InlineKeyboardMarkup(kb)
 
-# обработчик команд (например, /start)
+def _inline_settings_menu(user_id: int) -> InlineKeyboardMarkup:
+    settings = _user_settings.get(user_id, {"model": "—", "lang": "—", "spec": "—"})
+    kb = [
+        [InlineKeyboardButton(f"Модель: {settings['model']}", callback_data="settings_model")],
+        [InlineKeyboardButton(f"Язык: {settings['lang']}", callback_data="settings_lang")],
+        [InlineKeyboardButton(f"Специализация: {settings['spec']}", callback_data="settings_spec")],
+        [InlineKeyboardButton("⬅ Назад", callback_data="back_main")]
+    ]
+    return InlineKeyboardMarkup(kb)
+
+# /start
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    ai_on = _user_ai_enabled.get(user_id, False)
-
+    _user_ai_enabled.setdefault(user_id, False)
+    _user_settings.setdefault(user_id, {"model": "—", "lang": "—", "spec": "—"})
     await update.message.reply_text(
         "Привет! Вот твоё меню:",
-        reply_markup=_inline_main_menu(ai_on)
+        reply_markup=_inline_main_menu(user_id)
     )
 
-# обработчик нажатий на кнопки
+# компактное меню (при общении)
+async def menu_status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отображает краткое меню / статус в процессе общения"""
+    user_id = update.effective_user.id
+    ai_on = _user_ai_enabled.get(user_id, False)
+    settings = _user_settings.get(user_id, {"model": "—", "lang": "—"})
+    await update.message.reply_text(
+        f"🤖 ИИ: {'Вкл' if ai_on else 'Выкл'} | {settings['model']} | {settings['lang']}\n"
+        "Нажми /menu, чтобы открыть полное меню."
+    )
+
+
+def sanitize_text(s: str, lang: str) -> str:
+    if lang.lower().startswith("ru"):
+        # только кириллица + базовые знаки препинания
+        return re.sub(r"[^А-Яа-яЁё0-9\s.,:;!?()\[\]«»\"'—\-…]", "", s)
+    elif lang.lower().startswith("en"):
+        # только латиница + базовые знаки препинания
+        return re.sub(r"[^A-Za-z0-9\s.,:;!?()\[\]\"'—\-…]", "", s)
+    else:
+        # без фильтра — если язык не поддерживается или многоязычный
+        return s
+
+# чат с ИИ
+async def ai_chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not _user_ai_enabled.get(user_id, False):
+        return await menu_status_handler(update, context)
+
+    prompt = update.message.text
+    settings = _user_settings.get(user_id, {"model": "—", "lang": "—", "spec": "—"})
+
+    system_instructions = []
+    if settings["model"] != "—":
+        system_instructions.append(f"[Использовать модель: {settings['model']}]")
+    if settings["lang"] != "—":
+        system_instructions.append(f"[Язык общения: {settings['lang']}]")
+    if settings["spec"] != "—":
+        system_instructions.append(f"[Специализация: {settings['spec']}]")
+
+    full_prompt = "\n".join(system_instructions) + f"\n\n{prompt}"
+
+    try:
+        ai_response = await ask_ai(full_prompt)
+        ai_response = sanitize_text(ai_response, settings["lang"])
+        formatted = format_ai_response(ai_response)
+
+        ai_on = _user_ai_enabled.get(user_id, False)
+
+        short_menu = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                f"🤖 {'Вкл' if ai_on else 'Выкл'} | {settings['model']} | {settings['lang']}",
+                callback_data="menu_open"
+            )
+        ]])
+
+        formatted = format_ai_response(ai_response)
+
+        sent_msg = await update.message.reply_text(
+            formatted,
+            reply_markup=short_menu,
+            parse_mode=ParseMode.HTML
+        )
+
+        _last_ai_response[user_id] = {
+            "text": ai_response,
+            "msg_id": sent_msg.message_id
+        }
+        context.user_data["from_dialog_session"] = True
+
+    except Exception as e:
+        await update.message.reply_text(f"⚠ Ошибка при обращении к ИИ: {e}")
+
+
+def _inline_main_menu_with_return(user_id: int, from_dialog: bool) -> InlineKeyboardMarkup:
+    kb = [list(row) for row in _inline_main_menu(user_id).inline_keyboard]
+    if from_dialog and user_id in _last_ai_response:
+        kb.append([InlineKeyboardButton("⬅ Вернуться к ответу", callback_data="back_to_answer")])
+    return InlineKeyboardMarkup(kb)
+
+# inline меню
 async def inline_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     user_id = update.effective_user.id
-    ai_on = _user_ai_enabled.get(user_id, False)
+    data = query.data
+    from_dialog = context.user_data.get("from_dialog_session", False)
 
-    if query.data == "start_bot":
+    if data == "start_bot":
+        await query.edit_message_text("Бот запущен ✅", reply_markup=_inline_main_menu_with_return(user_id, from_dialog))
+
+    elif data == "toggle_ai":
+        _user_ai_enabled[user_id] = not _user_ai_enabled.get(user_id, False)
         await query.edit_message_text(
-            "Бот запущен ✅",
-            reply_markup=_inline_main_menu(ai_on)
+            f"ИИ {'включён ✅' if _user_ai_enabled[user_id] else 'выключен ❌'}",
+            reply_markup=_inline_main_menu_with_return(user_id, from_dialog)
         )
 
-    elif query.data == "toggle_ai":
-        ai_on = not ai_on
-        _user_ai_enabled[user_id] = ai_on
-        await query.edit_message_text(
-            f"ИИ {'включён ✅' if ai_on else 'выключен ❌'}",
-            reply_markup=_inline_main_menu(ai_on)
-        )
+    elif data == "settings":
+        await query.edit_message_text("Раздел настроек 🛠", reply_markup=_inline_settings_menu(user_id))
 
-    elif query.data == "settings":
-        await query.edit_message_text(
-            "Раздел настроек 🛠",
-            reply_markup=_inline_main_menu(ai_on)
-        )
+    elif data == "back_main":
+        await query.edit_message_text("Главное меню:", reply_markup=_inline_main_menu_with_return(user_id, from_dialog))
 
-    elif query.data == "help":
-        await query.edit_message_text(
-            "Раздел помощи ℹ️",
-            reply_markup=_inline_main_menu(ai_on)
-        )
+    elif data == "menu_open":
+        await query.edit_message_text("Главное меню:", reply_markup=_inline_main_menu_with_return(user_id, from_dialog))
 
-# регистрация хендлеров в основном файле
+    elif data == "back_to_answer":
+        last = _last_ai_response.get(user_id)
+        if last:
+            ai_on = _user_ai_enabled.get(user_id, False)
+            settings = _user_settings.get(user_id, {"model": "—", "lang": "—"})
+            short_menu = InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    f"🤖 {'Вкл' if ai_on else 'Выкл'} | {settings['model']} | {settings['lang']}",
+                    callback_data="menu_open"
+                )
+            ]])
+            await query.edit_message_text(last["text"], reply_markup=short_menu)
+        context.user_data["from_dialog_session"] = False
+
+import re
+
+def format_ai_response(text: str) -> str:
+    # Markdown -> HTML для выделений
+    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+    text = re.sub(r"\*(.+?)\*", r"<i>\1</i>", text)
+
+    # Заголовки, кроме препроцессорных директив
+    header_exclude = r"(?!include|define|pragma|if|endif|else|elif)"
+    text = re.sub(
+        rf"^\s*#{{3}}\s+{header_exclude}(.+)$",
+        r"<b>\1</b>", text, flags=re.MULTILINE
+    )
+    text = re.sub(
+        rf"^\s*#{{2}}\s+{header_exclude}(.+)$",
+        r"<b><u>\1</u></b>", text, flags=re.MULTILINE
+    )
+    text = re.sub(
+        rf"^\s*#{{1}}\s+{header_exclude}(.+)$",
+        r"<b><u>\1</u></b>", text, flags=re.MULTILINE
+    )
+
+    # Важные маркеры
+    text = re.sub(r"\b(Определение:)", r"<b>\1</b>", text)
+    text = re.sub(r"\b(Важно:)", r"<b><u>\1</u></b>", text)
+    text = re.sub(r"\b(Пример:)", r"<b>\1</b>", text)
+
+    # Списки
+    text = re.sub(r"^\s*[\*\-]\s+", r"• ", text, flags=re.MULTILINE)
+    text = re.sub(r"^(\d+)\.\s+", r"\1) ", text, flags=re.MULTILINE)
+
+    # Кодовые блоки
+    def escape_code_block(match):
+        code = match.group(1)
+        code = code.replace("<", "&lt;").replace(">", "&gt;")
+        code = code.strip("\n")
+        code = re.sub(r"\n{3,}", "\n\n", code)
+        return f"<pre><code>{code}</code></pre>"
+
+    text = re.sub(r"```(.*?)```", escape_code_block, text, flags=re.DOTALL)
+
+    # Однострочный код
+    text = re.sub(
+        r"`([^`\n]+)`",
+        lambda m: f"<code>{m.group(1).replace('<', '&lt;').replace('>', '&gt;')}</code>",
+        text
+    )
+
+    # Экранируем < > в строках с препроцессором вне <pre><code>
+    def escape_includes_outside_code(txt):
+        def repl(m):
+            return m.group(0).replace("<", "&lt;").replace(">", "&gt;")
+        pattern = r'^(?:(?!<pre><code>).)*#\s*include\s+<[^>]+>'
+        return re.sub(pattern, repl, txt, flags=re.MULTILINE)
+    
+    text = escape_includes_outside_code(text)
+
+    # Нормализация пустых строк вне кодовых блоков
+    def normalize_text_block(block):
+        return re.sub(r"\n{3,}", "\n\n", block)
+
+    parts = re.split(r"(<pre><code>.*?</code></pre>)", text, flags=re.DOTALL)
+    for i in range(0, len(parts), 2):
+        parts[i] = normalize_text_block(parts[i])
+    text = "".join(parts)
+
+    return text
+
+# регистрация
 def register_handlers(app):
     app.add_handler(CommandHandler("start", start_handler))
+    app.add_handler(CommandHandler("menu", start_handler))  # открыть полное меню
     app.add_handler(CallbackQueryHandler(inline_menu_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat_handler))
