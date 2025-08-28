@@ -1,4 +1,4 @@
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler, MessageHandler, filters
 from src.utils.access import deny_if_not_allowed
 from src.ai_providers.openai_compatible import ask_ai
@@ -19,525 +19,73 @@ from telegram.constants import ParseMode  # ✅ для HTML форматиров
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler
-
+import json
 # Храним состояние включён/выключен ИИ по пользователю
 _user_ai_enabled = {}
 
 
-import json
+
 import os
 
 
 from src.ai_providers.openai_compatible import ask_ai
 
-async def process_user_message(update, context):
-    user_id = update.effective_user.id
-    text = update.message.text
-
-    # Получаем настройки пользователя
-    settings = get_user_settings(user_id)
-
-    # Передаём их в ask_ai
-    response = await ask_ai(
-        user_text=text,
-        model=settings["model"],
-        temperature=settings["temp"]
-    )
-
-    await update.message.reply_text(response)
-
-
-SETTINGS_FILE = "settings.json"
-
-DEFAULT_SETTINGS = {
-    "model": "meta-llama/llama-4-scout-17b-16e-instruct",
-    "temp": 0.7,
-    "history": True,
-    "lang": "RU",
-    "theme": "light"
-}
-
-def load_settings():
-    try:
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
-
-def save_settings():
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(user_settings, f, ensure_ascii=False, indent=2)
-
-user_settings = load_settings()
-
-def get_user_settings(user_id):
-    if str(user_id) not in user_settings:
-        user_settings[str(user_id)] = DEFAULT_SETTINGS.copy()
-        save_settings()
-    return user_settings[str(user_id)]
-
-# ✅ Функция форматирования ответа
-def format_ai_response(text: str) -> str:
-    text = text.strip()
-    text = text.replace("\t", "    ")  # заменяем табуляцию на пробелы
-    # Пример: код в блоках
-    if "```" in text:
-        text = text.replace("```python", "<pre><code>").replace("```", "</code></pre>")
-    # Списки
-    text = text.replace("- ", "• ")
-    return text
-
-def _main_menu(ai_on: bool) -> ReplyKeyboardMarkup:
+def _inline_main_menu(ai_on: bool) -> InlineKeyboardMarkup:
     kb = [
-        [KeyboardButton("Запустить бота")],
-        [KeyboardButton("🛑 Выключить ИИ") if ai_on else KeyboardButton("🤖 Включить ИИ")],
-        [KeyboardButton("⚙ Настройки"), KeyboardButton("❓ Помощь")]
-    ]
-    return ReplyKeyboardMarkup(kb, resize_keyboard=True)
-
-def _settings_menu() -> ReplyKeyboardMarkup:
-    kb = [[KeyboardButton("🔙 Назад")]]
-    return ReplyKeyboardMarkup(kb, resize_keyboard=True)
-
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await deny_if_not_allowed(update):
-        return
-    _user_ai_enabled[update.effective_user.id] = False
-    await update.message.reply_text(
-        f"Привет, {update.effective_user.first_name}! 👋\nВыбери действие:",
-        reply_markup=_main_menu(False)
-    )
-# ====== МЕНЮ ======
-
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import ContextTypes
-
-# ====== ЛОКАЛИЗАЦИЯ ======
-LANG_TEXTS = {
-    "RU": {
-        "main_menu": [
-            ["Запустить бота"],
-            ["🤖 Включить ИИ"],
-            ["⚙ Настройки", "❓ Помощь"]
-        ],
-        "settings_title": "⚙ Настройки",
-        "help": "Нажми «Включить ИИ», чтобы получать ответы.",
-        "back": "⬅ Назад",
-        "lang_changed": "✅ Язык изменён на Русский (RU)."
-    },
-    "EN": {
-        "main_menu": [
-            ["Start bot"],
-            ["🤖 Enable AI"],
-            ["⚙ Settings", "❓ Help"]
-        ],
-        "settings_title": "⚙ Settings",
-        "help": "Press 'Enable AI' to start receiving answers.",
-        "back": "⬅ Back",
-        "lang_changed": "You've selected English (EN) as your preferred language. How can I assist you today?"
-    },
-    "DE": {
-        "main_menu": [
-            ["Bot starten"],
-            ["🤖 KI aktivieren"],
-            ["⚙ Einstellungen", "❓ Hilfe"]
-        ],
-        "settings_title": "⚙ Einstellungen",
-        "help": "Drücke 'KI aktivieren', um Antworten zu erhalten.",
-        "back": "⬅ Zurück",
-        "lang_changed": "Sie haben Deutsch (DE) als bevorzugte Sprache ausgewählt."
-    }
-}
-
-# ====== МЕНЮ ======
-def _main_menu(ai_on: bool, lang: str) -> ReplyKeyboardMarkup:
-    menu = [row[:] for row in LANG_TEXTS[lang]["main_menu"]]
-    if ai_on:
-        menu[1][0] = "🛑 Выключить ИИ" if lang == "RU" else ("🛑 Disable AI" if lang == "EN" else "🛑 KI deaktivieren")
-    return ReplyKeyboardMarkup(menu, resize_keyboard=True)
-
-def _settings_menu(user_id):
-    settings = get_user_settings(user_id)
-    lang = settings["lang"]
-    return {
-        "text": (
-            f"{LANG_TEXTS[lang]['settings_title']}\n\n"
-            f"Модель: {settings['model']}\n"
-            f"Температура: {settings['temp']}\n"
-            f"История: {'вкл' if settings['history'] else 'выкл'}\n"
-            f"Язык: {settings['lang']}\n"
-            f"Тема: {settings['theme']}"
-        ),
-        "keyboard": [
-            ["🤖 Модель ИИ", "🎯 Температура"],
-            ["📜 История диалога", "🌐 Язык"],
-            ["🎨 Тема", "♻ Сброс настроек"],
-            [LANG_TEXTS[lang]["back"]]
+        [InlineKeyboardButton("🚀 Запустить бота", callback_data="start_bot")],
+        [InlineKeyboardButton("🛑 Выключить ИИ" if ai_on else "🤖 Включить ИИ", callback_data="toggle_ai")],
+        [
+            InlineKeyboardButton("⚙ Настройки", callback_data="settings"),
+            InlineKeyboardButton("❓ Помощь", callback_data="help")
         ]
-    }
+    ]
+    return InlineKeyboardMarkup(kb)
 
-# ====== ОБРАБОТЧИК НАСТРОЕК ======
-async def handle_settings(update, uid, text):
-    settings = get_user_settings(uid)
-    lang = settings["lang"]
-
-    # --- Модель ---
-    if text == "🤖 Модель ИИ":
-        await update.message.reply_text(
-            "Выберите модель:" if lang == "RU" else ("Select model:" if lang == "EN" else "Modell auswählen:"),
-            reply_markup=ReplyKeyboardMarkup(
-                [["llama3-8b-8192", "mixtral-8x7b-32768"], [LANG_TEXTS[lang]["back"]]],
-                resize_keyboard=True
-            )
-        )
-        return True
-
-    if text in ["llama3-8b-8192", "mixtral-8x7b-32768"]:
-        settings["model"] = text
-        save_settings()
-        await update.message.reply_text(
-            f"✅ Модель изменена на {text}",
-            reply_markup=ReplyKeyboardMarkup(_settings_menu(uid)["keyboard"], resize_keyboard=True)
-        )
-        return True
-
-    # --- Температура ---
-    if text == "🎯 Температура":
-        await update.message.reply_text(
-            "Выберите температуру:" if lang == "RU" else ("Select temperature:" if lang == "EN" else "Temperatur auswählen:"),
-            reply_markup=ReplyKeyboardMarkup([["0.0", "0.7", "1.0"], [LANG_TEXTS[lang]["back"]]], resize_keyboard=True)
-        )
-        return True
-
-    if text in ["0.0", "0.7", "1.0"]:
-        settings["temp"] = float(text)
-        save_settings()
-        await update.message.reply_text(
-            f"✅ Температура изменена на {text}",
-            reply_markup=ReplyKeyboardMarkup(_settings_menu(uid)["keyboard"], resize_keyboard=True)
-        )
-        return True
-
-    # --- История ---
-    if text == "📜 История диалога":
-        settings["history"] = not settings["history"]
-        save_settings()
-        await update.message.reply_text(
-            f"📜 История теперь {'включена' if settings['history'] else 'выключена'}",
-            reply_markup=ReplyKeyboardMarkup(_settings_menu(uid)["keyboard"], resize_keyboard=True)
-        )
-        return True
-
-    # --- Язык ---
-    if text == "🌐 Язык":
-        await update.message.reply_text(
-            "Выберите язык:" if lang == "RU" else ("Select language:" if lang == "EN" else "Sprache auswählen:"),
-            reply_markup=ReplyKeyboardMarkup([["RU", "EN", "DE"], [LANG_TEXTS[lang]["back"]]], resize_keyboard=True)
-        )
-        return True
-
-    if text in ["RU", "EN", "DE"]:
-        settings["lang"] = text
-        save_settings()
-        await update.message.reply_text(
-            LANG_TEXTS[text]["lang_changed"],
-            reply_markup=_main_menu(_user_ai_enabled.get(uid, False), text)
-        )
-        return True
-
-    # --- Тема ---
-    if text == "🎨 Тема":
-        await update.message.reply_text(
-            "Выберите тему:" if lang == "RU" else ("Select theme:" if lang == "EN" else "Thema auswählen:"),
-            reply_markup=ReplyKeyboardMarkup([["light", "dark"], [LANG_TEXTS[lang]["back"]]], resize_keyboard=True)
-        )
-        return True
-
-    if text in ["light", "dark"]:
-        settings["theme"] = text
-        save_settings()
-        await update.message.reply_text(
-            f"✅ Тема изменена на {text}",
-            reply_markup=ReplyKeyboardMarkup(_settings_menu(uid)["keyboard"], resize_keyboard=True)
-        )
-        return True
-
-    # --- Сброс ---
-    if text == "♻ Сброс настроек":
-        user_settings[str(uid)] = DEFAULT_SETTINGS.copy()
-        save_settings()
-        await update.message.reply_text(
-            "♻ Настройки сброшены" if lang == "RU" else ("♻ Settings reset" if lang == "EN" else "♻ Einstellungen zurückgesetzt"),
-            reply_markup=ReplyKeyboardMarkup(_settings_menu(uid)["keyboard"], resize_keyboard=True)
-        )
-        return True
-
-    return False
-
-
-# ====== ОБРАБОТЧИК ЗАПРОСА К ИИ ======
-
-async def handle_ai_request(update, uid, text):
-    context_data = None
-    if user_memory:
-        try:
-            user_memory.add_message(uid, "user", text)
-            context_data = user_memory.get_context(uid)
-        except Exception:
-            pass
-
-    try:
-        answer = await ask_ai(user_text=text)
-    except TypeError:
-        answer = await ask_ai(text)
-    except Exception:
-        answer = "⚠ Не удалось получить ответ от ИИ. Попробуй позже."
-
-    if user_memory and answer:
-        try:
-            user_memory.add_message(uid, "assistant", answer)
-        except Exception:
-            pass
-
-    if not answer:
-        answer = "Не удалось получить ответ. Попробуй ещё раз позже."
-
-    if split_text:
-        for part in split_text(answer):
-            await update.message.reply_text(part)
-    else:
-        formatted_answer = f"*Ответ ИИ:*\n\n_{answer}_"
-        await update.message.reply_text(
-            formatted_answer,
-            parse_mode="MarkdownV2"
-)
-
-    # Память диалога (если есть)
-    context_data = None
-    if user_memory:
-        try:
-            user_memory.add_message(uid, "user", text)
-            context_data = user_memory.get_context(uid)
-        except Exception:
-            pass
-
-    # Вызов ИИ
-    try:
-        answer = await ask_ai(user_text=text)
-    except TypeError:
-        answer = await ask_ai(text)
-    except Exception:
-        answer = "⚠ Не удалось получить ответ от ИИ. Попробуй позже."
-
-    if user_memory and answer:
-        try:
-            user_memory.add_message(uid, "assistant", answer)
-        except Exception:
-            pass
-
-    if not answer:
-        answer = "Не удалось получить ответ. Попробуй ещё раз позже."
-
-    if split_text:
-        for part in split_text(answer):
-            await update.message.reply_text(part)
-    else:
-        await update.message.reply_text(answer)
-
-# 📌 Форматирование ответа
-def format_ai_answer(text: str, icon: str = "🤖") -> str:
-    return (
-        f"<b>{icon}</b>\n"
-        f"<pre>{text}</pre>\n"
-        f"<i>— </i>"
-    )
-
-# 📌 Автоподбор иконки по теме
-def choose_icon_by_topic(user_text: str) -> str:
-    topics = {
-        "код": "💻",
-        "python": "🐍",
-        "рецепт": "🍳",
-        "погода": "☀️",
-        "шутка": "😂",
-        "новости": "📰"
-    }
-    for key, icon in topics.items():
-        if key in user_text.lower():
-            return icon
-    return "🤖"
-
-# 📌 Основной обработчик
+# обработчик команд (например, /start)
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Пример стартового меню с inline-кнопками
-    keyboard = [
-        [
-            InlineKeyboardButton("Настройки", callback_data="settings"),
-            InlineKeyboardButton("Помощь", callback_data="help"),
-        ],
-        [
-            InlineKeyboardButton("Модель: Groq", callback_data="model_groq"),
-        ]
-    ]
+    user_id = update.effective_user.id
+    ai_on = _user_ai_enabled.get(user_id, False)
+
     await update.message.reply_text(
-        "Привет! Я готов. Пиши вопрос — отвечу с помощью ИИ.\n"
-        "Используй кнопки ниже для команд:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        "Привет! Вот твоё меню:",
+        reply_markup=_inline_main_menu(ai_on)
     )
 
-async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Напиши текст — я задам его ИИ и верну ответ.\n"
-        "Кнопки используются для переключения режимов и настроек."
-    )
-
-# ---------- Обработчик inline-кнопок (не обращаемся к ИИ) ----------
-
-async def callback_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# обработчик нажатий на кнопки
+async def inline_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if not query:
-        return
-
-    data = query.data or ""
-    # Обязательно подтверждаем callback, чтобы убрать «часики»
     await query.answer()
 
-    # Пример роутинга по data
-    if data == "settings":
-        await query.edit_message_text("Настройки:\n- Скоро здесь будет меню настроек.")
-    elif data == "help":
-        await query.edit_message_text("Это раздел помощи. Задай вопрос в чате — получишь ответ от ИИ.")
-    elif data == "model_groq":
-        # здесь можно выставить флаг в context.user_data / context.chat_data
-        context.user_data["model"] = "groq"
-        await query.edit_message_text("Модель переключена на Groq ✅")
-    else:
-        # Неизвестная команда — просто уведомим
-        await query.edit_message_text(f"Команда «{data}» принята. Скоро добавим действие.")
+    user_id = update.effective_user.id
+    ai_on = _user_ai_enabled.get(user_id, False)
 
-# ---------- Обработчик «живого» текста к ИИ ----------
-
-async def ai_chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Тут попадут ТОЛЬКО обычные текстовые сообщения, благодаря фильтру в bot.py
-    # Никаких callback_query здесь нет
-    user_message = (update.message.text or "").strip()
-    if not user_message:
-        return
-
-    # Если у тебя есть ReplyKeyboard с «служебными» кнопками, которые присылают текст,
-    # можно отфильтровать их здесь, чтобы не уходили в ИИ:
-    REPLY_COMMANDS = {"Настройки", "Помощь", "Меню"}  # добавь свои
-    if user_message in REPLY_COMMANDS:
-        # тут либо просто игнор, либо отправь подсказку
-        return
-
-    # Пример: выбрать иконку по теме
-    icon = choose_icon_by_topic(user_message)
-
-    # Получить ответ от ИИ (вызов твоего провайдера)
-    # Предположим, у тебя есть функция ask_ai(...)
-    answer = await ask_ai(user_message)  # <-- не забудь импорт/определение
-
-    # Оформить
-    formatted = format_ai_answer(answer, icon)
-
-    # Телеграм лимит 4096 символов; HTML-формат считаем безопасным буфером 4000
-    if len(formatted) <= 4000:
-        await update.message.reply_text(formatted, parse_mode="HTML")
-    else:
-        # Мягкое деление на куски по 4000 символов
-        for i in range(0, len(formatted), 4000):
-            await update.message.reply_text(formatted[i:i+4000], parse_mode="HTML")
-
-
-    uid = update.effective_user.id
-    text = (update.message.text or "").strip()
-    settings = get_user_settings(uid)
-    lang = settings["lang"]
-    ai_on = _user_ai_enabled.get(uid, False)
-
-    
-
-    # ==== НАВИГАЦИЯ ====
-    if text in [LANG_TEXTS[lang]["back"], "🔙 Назад"]:
-        await update.message.reply_text(
-            "Главное меню:" if lang == "RU" else ("Main menu:" if lang == "EN" else "Hauptmenü:"),
-            reply_markup=_main_menu(ai_on, lang)
+    if query.data == "start_bot":
+        await query.edit_message_text(
+            "Бот запущен ✅",
+            reply_markup=_inline_main_menu(ai_on)
         )
-        return
 
-    if text in ["⚙ Настройки", "⚙ Settings", "⚙ Einstellungen"]:
-        menu = _settings_menu(uid)
-        await update.message.reply_text(
-            menu["text"],
-            reply_markup=ReplyKeyboardMarkup(menu["keyboard"], resize_keyboard=True)
+    elif query.data == "toggle_ai":
+        ai_on = not ai_on
+        _user_ai_enabled[user_id] = ai_on
+        await query.edit_message_text(
+            f"ИИ {'включён ✅' if ai_on else 'выключен ❌'}",
+            reply_markup=_inline_main_menu(ai_on)
         )
-        return
 
-    if text in ["❓ Помощь", "❓ Help", "❓ Hilfe"]:
-        await update.message.reply_text(LANG_TEXTS[lang]["help"])
-        return
-
-    # ==== ВКЛ/ВЫКЛ ИИ ====
-    if text in ["🤖 Включить ИИ", "🤖 Enable AI", "🤖 KI aktivieren"]:
-        _user_ai_enabled[uid] = True
-        await update.message.reply_text(
-            "ИИ включён ✅" if lang == "RU" else ("AI enabled ✅" if lang == "EN" else "KI aktiviert ✅"),
-            reply_markup=_main_menu(True, lang)
+    elif query.data == "settings":
+        await query.edit_message_text(
+            "Раздел настроек 🛠",
+            reply_markup=_inline_main_menu(ai_on)
         )
-        return
 
-    if text in ["🛑 Выключить ИИ", "🛑 Disable AI", "🛑 KI deaktivieren"]:
-        _user_ai_enabled[uid] = False
-        await update.message.reply_text(
-            "ИИ выключен ❌" if lang == "RU" else ("AI disabled ❌" if lang == "EN" else "KI deaktiviert ❌"),
-            reply_markup=_main_menu(False, lang)
+    elif query.data == "help":
+        await query.edit_message_text(
+            "Раздел помощи ℹ️",
+            reply_markup=_inline_main_menu(ai_on)
         )
-        return
 
-    # ==== НАСТРОЙКИ ====
-    if await handle_settings(update, uid, text):
-        return
-
-    # ==== ПРОВЕРКА ИИ ====
-    if not ai_on:
-        await update.message.reply_text(
-            "Сначала включи ИИ через меню." if lang == "RU" else ("Please enable AI first." if lang == "EN" else "Bitte aktivieren Sie zuerst die KI.")
-        )
-        return
-    context_data = None
-    if user_memory:
-        try:
-            user_memory.add_message(uid, "user", text)
-            context_data = user_memory.get_context(uid)
-        except Exception:
-            pass
-
-    # Вызов ИИ
-    try:
-        answer = await ask_ai(user_text=text)
-    except TypeError:
-        answer = await ask_ai(text)
-    except Exception:
-        answer = "⚠ Не удалось получить ответ от ИИ. Попробуй позже."
-
-    if user_memory and answer:
-        try:
-            user_memory.add_message(uid, "assistant", answer)
-        except Exception:
-            pass
-
-    if not answer:
-        answer = "Не удалось получить ответ. Попробуй ещё раз позже."
-
-    # ✅ Форматируем ответ
-    answer = format_ai_response(answer)
-
-    
-
+# регистрация хендлеров в основном файле
 def register_handlers(app):
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CallbackQueryHandler(callback_button_handler))
-  
-    app.add_handler(CommandHandler("help", help_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start_handler))  
+    app.add_handler(CommandHandler("start", start_handler))
+    app.add_handler(CallbackQueryHandler(inline_menu_handler))
