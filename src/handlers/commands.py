@@ -16,6 +16,10 @@ except ImportError:
 
 from telegram.constants import ParseMode  # ✅ для HTML форматирования
 
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, CallbackQueryHandler
+
 # Храним состояние включён/выключен ИИ по пользователю
 _user_ai_enabled = {}
 
@@ -364,23 +368,86 @@ def choose_icon_by_topic(user_text: str) -> str:
     return "🤖"
 
 # 📌 Основной обработчик
-async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_message = update.message.text
+async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Пример стартового меню с inline-кнопками
+    keyboard = [
+        [
+            InlineKeyboardButton("Настройки", callback_data="settings"),
+            InlineKeyboardButton("Помощь", callback_data="help"),
+        ],
+        [
+            InlineKeyboardButton("Модель: Groq", callback_data="model_groq"),
+        ]
+    ]
+    await update.message.reply_text(
+        "Привет! Я готов. Пиши вопрос — отвечу с помощью ИИ.\n"
+        "Используй кнопки ниже для команд:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Напиши текст — я задам его ИИ и верну ответ.\n"
+        "Кнопки используются для переключения режимов и настроек."
+    )
+
+# ---------- Обработчик inline-кнопок (не обращаемся к ИИ) ----------
+
+async def callback_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+
+    data = query.data or ""
+    # Обязательно подтверждаем callback, чтобы убрать «часики»
+    await query.answer()
+
+    # Пример роутинга по data
+    if data == "settings":
+        await query.edit_message_text("Настройки:\n- Скоро здесь будет меню настроек.")
+    elif data == "help":
+        await query.edit_message_text("Это раздел помощи. Задай вопрос в чате — получишь ответ от ИИ.")
+    elif data == "model_groq":
+        # здесь можно выставить флаг в context.user_data / context.chat_data
+        context.user_data["model"] = "groq"
+        await query.edit_message_text("Модель переключена на Groq ✅")
+    else:
+        # Неизвестная команда — просто уведомим
+        await query.edit_message_text(f"Команда «{data}» принята. Скоро добавим действие.")
+
+# ---------- Обработчик «живого» текста к ИИ ----------
+
+async def ai_chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Тут попадут ТОЛЬКО обычные текстовые сообщения, благодаря фильтру в bot.py
+    # Никаких callback_query здесь нет
+    user_message = (update.message.text or "").strip()
+    if not user_message:
+        return
+
+    # Если у тебя есть ReplyKeyboard с «служебными» кнопками, которые присылают текст,
+    # можно отфильтровать их здесь, чтобы не уходили в ИИ:
+    REPLY_COMMANDS = {"Настройки", "Помощь", "Меню"}  # добавь свои
+    if user_message in REPLY_COMMANDS:
+        # тут либо просто игнор, либо отправь подсказку
+        return
+
+    # Пример: выбрать иконку по теме
     icon = choose_icon_by_topic(user_message)
 
-    # Получаем ответ от ИИ
-    answer = await ask_ai(user_message)
+    # Получить ответ от ИИ (вызов твоего провайдера)
+    # Предположим, у тебя есть функция ask_ai(...)
+    answer = await ask_ai(user_message)  # <-- не забудь импорт/определение
 
-    # Форматируем
-    formatted_text = format_ai_answer(answer, icon)
+    # Оформить
+    formatted = format_ai_answer(answer, icon)
 
-    # Если сообщение в пределах лимита — отправляем целиком
-    if len(formatted_text) <= 4000:
-        await update.message.reply_text(formatted_text, parse_mode="HTML")
+    # Телеграм лимит 4096 символов; HTML-формат считаем безопасным буфером 4000
+    if len(formatted) <= 4000:
+        await update.message.reply_text(formatted, parse_mode="HTML")
     else:
-        # Если очень длинный ответ — режем на куски
-        for i in range(0, len(formatted_text), 4000):
-            await update.message.reply_text(formatted_text[i:i+4000], parse_mode="HTML")
+        # Мягкое деление на куски по 4000 символов
+        for i in range(0, len(formatted), 4000):
+            await update.message.reply_text(formatted[i:i+4000], parse_mode="HTML")
 
 
     uid = update.effective_user.id
@@ -388,6 +455,8 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     settings = get_user_settings(uid)
     lang = settings["lang"]
     ai_on = _user_ai_enabled.get(uid, False)
+
+    
 
     # ==== НАВИГАЦИЯ ====
     if text in [LANG_TEXTS[lang]["back"], "🔙 Назад"]:
@@ -468,4 +537,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def register_handlers(app):
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler))  
+    app.add_handler(CallbackQueryHandler(callback_button_handler))
+  
+    app.add_handler(CommandHandler("help", help_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start_handler))  
