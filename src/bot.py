@@ -10,7 +10,7 @@ from telegram.ext import (
 
 from src.handlers.commands import register_handlers
 
-from src.config import TELEGRAM_BOT_TOKEN, ALLOWED_USERS
+from src.config import TELEGRAM_BOT_TOKEN
 
 
 # Логирование
@@ -20,12 +20,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("tg-ai-bot")
 
-
-async def _deny_if_not_allowed(update: Update) -> bool:
-    if update.effective_user.id not in ALLOWED_USERS:
-        await update.message.reply_text("⛔ У вас нет доступа к этому боту.")
-        return True
-    return False
 
 def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()

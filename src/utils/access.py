@@ -9,8 +9,8 @@ async def deny_if_not_allowed(update: Update) -> bool:
     if user_id not in ALLOWED_USERS:
         logger.warning(f"⛔ Доступ запрещён для пользователя: {user_id}")
         await update.message.reply_text(
-            f"⛔ Доступ запрещён.\nВаш Telegram ID: `{user_id}`\n"
-            "Если вы считаете, что это ошибка — свяжитесь с администратором.",
+            f"⛔ Доступ запрещён.\n\nВаш Telegram ID: `{user_id}`\n"
+            "Если вы считаете, что это ошибка — свяжитесь с [поддержкой](https://t.me/VictorEvgenievichh).",
             parse_mode="Markdown"
         )
         return True

@@ -1,7 +1,8 @@
 from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler, MessageHandler, filters
 from src.ai_providers.openai_compatible import ask_ai, SYSTEM_PROMPT
-from src.bot import _deny_if_not_allowed
+from src.utils.access import deny_if_not_allowed
+
 
 
 try:
@@ -50,7 +51,7 @@ def _inline_settings_menu(user_id: int) -> InlineKeyboardMarkup:
 
 # /start
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await _deny_if_not_allowed(update):
+    if await deny_if_not_allowed(update):
         return  # прерываем выполнение, если нет доступа
 
     user_id = update.effective_user.id

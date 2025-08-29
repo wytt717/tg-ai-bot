@@ -45,12 +45,10 @@ def env_int(key: str, default: int) -> int:
 TELEGRAM_BOT_TOKEN = env_str("TELEGRAM_BOT_TOKEN", required=True)
 API_KEY = env_str("OPENAI_API_KEYS", required=True)
 BASE_URL = env_str("BASE_URL", "https://api.groq.com/openai/v1")
-MODEL = env_str("MODEL", "llama-3.1-70b-versatile")
+MODEL = env_str("MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
 TEMPERATURE = env_float("TEMPERATURE", 0.7)
 MAX_HISTORY_CHARS = env_int("MAX_HISTORY_CHARS", 12000)
 
 TG_MAX_MESSAGE_LEN = 4096
-SYSTEM_PROMPT = env_str(
-    "SYSTEM_PROMPT",
-    "You are a helpful, concise assistant. Answer in the user's language."
-)
+
+
