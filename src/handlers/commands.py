@@ -2,7 +2,7 @@ from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler, MessageHandler, filters
 from src.utils.access import deny_if_not_allowed
 from src.ai_providers.openai_compatible import ask_ai
-import logging
+
 
 try:
     from src.utils.memory import user_memory
@@ -14,8 +14,8 @@ try:
 except ImportError:
     split_text = None
 
-from telegram.constants import ParseMode  # ✅ для HTML форматирования
 
+from telegram.constants import ParseMode  # ✅ для HTML форматирования
 import re
 from telegram.constants import ParseMode
 
@@ -38,8 +38,8 @@ def _inline_main_menu(user_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🚀 Запустить бота", callback_data="start_bot")],
         [InlineKeyboardButton("🛑 Выключить ИИ" if ai_on else "🤖 Включить ИИ", callback_data="toggle_ai")],
         [
-            InlineKeyboardButton("⚙ Настройки", callback_data="settings"),
-            InlineKeyboardButton("❓ Помощь", callback_data="help")
+        InlineKeyboardButton("⚙ Настройки", callback_data="settings"),
+        InlineKeyboardButton("❓ Помощь", callback_data="help")
         ],
 
     ]
@@ -179,7 +179,7 @@ async def inline_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             settings = _user_settings.get(user_id, {"model": "—", "lang": "—"})
             short_menu = InlineKeyboardMarkup([[
                 InlineKeyboardButton(
-                    f"🤖 {'Вкл' if ai_on else 'Выкл'} | {settings['model']} | {settings['lang']}",
+                    f"{'Вкл' if ai_on else 'Выкл'} | {settings['model']} | {settings['lang']}",
                     callback_data="menu_open"
                 )
             ]])
@@ -195,23 +195,8 @@ def format_ai_response(text: str) -> str:
 
     # Заголовки, кроме препроцессорных директив
     header_exclude = r"(?!include|define|pragma|if|endif|else|elif)"
-    text = re.sub(
-        rf"^\s*#{{3}}\s+{header_exclude}(.+)$",
-        r"<b>\1</b>", text, flags=re.MULTILINE
-    )
-    text = re.sub(
-        rf"^\s*#{{2}}\s+{header_exclude}(.+)$",
-        r"<b><u>\1</u></b>", text, flags=re.MULTILINE
-    )
-    text = re.sub(
-        rf"^\s*#{{1}}\s+{header_exclude}(.+)$",
-        r"<b><u>\1</u></b>", text, flags=re.MULTILINE
-    )
+    
 
-    # Важные маркеры
-    text = re.sub(r"\b(Определение:)", r"<b>\1</b>", text)
-    text = re.sub(r"\b(Важно:)", r"<b><u>\1</u></b>", text)
-    text = re.sub(r"\b(Пример:)", r"<b>\1</b>", text)
 
     # Списки
     text = re.sub(r"^\s*[\*\-]\s+", r"• ", text, flags=re.MULTILINE)
@@ -233,15 +218,6 @@ def format_ai_response(text: str) -> str:
         lambda m: f"<code>{m.group(1).replace('<', '&lt;').replace('>', '&gt;')}</code>",
         text
     )
-
-    # Экранируем < > в строках с препроцессором вне <pre><code>
-    def escape_includes_outside_code(txt):
-        def repl(m):
-            return m.group(0).replace("<", "&lt;").replace(">", "&gt;")
-        pattern = r'^(?:(?!<pre><code>).)*#\s*include\s+<[^>]+>'
-        return re.sub(pattern, repl, txt, flags=re.MULTILINE)
-    
-    text = escape_includes_outside_code(text)
 
     # Нормализация пустых строк вне кодовых блоков
     def normalize_text_block(block):
