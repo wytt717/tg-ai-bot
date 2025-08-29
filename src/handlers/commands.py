@@ -3,7 +3,7 @@ from telegram.ext import ContextTypes, CommandHandler, MessageHandler, filters
 from src.ai_providers.openai_compatible import ask_ai, SYSTEM_PROMPT
 from src.utils.access import deny_if_not_allowed
 
-
+import re
 
 try:
     from src.utils.memory import user_memory
@@ -11,7 +11,7 @@ except ImportError:
     user_memory = None
 
 from telegram.constants import ParseMode  # ✅ для HTML форматирования
-import re
+
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler
@@ -27,7 +27,6 @@ callback_data="menu_open_from_dialog"
 
 def _inline_main_menu(user_id: int) -> InlineKeyboardMarkup:
     ai_on = _user_ai_enabled.get(user_id, False)
-    settings = _user_settings.get(user_id, {"model": "—", "lang": "—", "spec": "—"})
     kb = [
         [InlineKeyboardButton("🚀 Запустить бота", callback_data="start_bot")],
         [InlineKeyboardButton("🛑 Выключить ИИ" if ai_on else "🤖 Включить ИИ", callback_data="toggle_ai")],
@@ -53,7 +52,7 @@ def _inline_settings_menu(user_id: int) -> InlineKeyboardMarkup:
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await deny_if_not_allowed(update):
         return  # прерываем выполнение, если нет доступа
-
+    
     user_id = update.effective_user.id
     _user_ai_enabled.setdefault(user_id, False)
     _user_settings.setdefault(user_id, {"model": "—", "lang": "—", "spec": "—"})
@@ -61,7 +60,6 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Привет! Вот твоё меню:",
         reply_markup=_inline_main_menu(user_id)
     )
-
 
 # компактное меню (при общении)
 async def menu_status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -177,12 +175,16 @@ def _inline_main_menu_with_return(user_id: int, from_dialog: bool) -> InlineKeyb
 
 # inline меню
 async def inline_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await deny_if_not_allowed(update):
+        return
+
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
     data = query.data
     from_dialog = context.user_data.get("from_dialog_session", False)
 
+    # Главное меню
     if data == "start_bot":
         await query.edit_message_text("Бот запущен ✅", reply_markup=_inline_main_menu_with_return(user_id, from_dialog))
 
@@ -196,11 +198,16 @@ async def inline_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     elif data == "settings":
         await query.edit_message_text("Раздел настроек 🛠", reply_markup=_inline_settings_menu(user_id))
 
-    elif data == "back_main":
-        await query.edit_message_text("Главное меню:", reply_markup=_inline_main_menu_with_return(user_id, from_dialog))
+    elif data == "help":
+        await query.edit_message_text(
+            "ℹ Здесь будет текст помощи.\n"
+            "Например, как пользоваться ботом.",
+            reply_markup=_inline_main_menu_with_return(user_id, from_dialog)
+        )
 
-    elif data == "menu_open":
-        await query.edit_message_text("Главное меню:", reply_markup=_inline_main_menu_with_return(user_id, from_dialog))
+    elif data == "back_main" or data == "menu_open":
+        context.user_data["from_dialog_session"] = False
+        await query.edit_message_text("Главное меню:", reply_markup=_inline_main_menu_with_return(user_id, False))
 
     elif data == "back_to_answer":
         last = _last_ai_response.get(user_id)
@@ -216,7 +223,91 @@ async def inline_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.edit_message_text(last["text"], reply_markup=short_menu)
         context.user_data["from_dialog_session"] = False
 
-import re
+    # Настройки: выбор параметров
+    elif data == "settings_model":
+        await query.edit_message_text(
+            "Выберите модель:",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("GPT‑4", callback_data="set_model_gpt4")],
+                [InlineKeyboardButton("GPT‑3.5", callback_data="set_model_gpt35")],
+                [InlineKeyboardButton("⬅ Назад", callback_data="settings")]
+            ])
+        )
+
+    elif data == "settings_lang":
+        await query.edit_message_text(
+            "Выберите язык:",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Русский", callback_data="set_lang_ru")],
+                [InlineKeyboardButton("English", callback_data="set_lang_en")],
+                [InlineKeyboardButton("⬅ Назад", callback_data="settings")]
+            ])
+        )
+
+    elif data == "settings_spec":
+        await query.edit_message_text(
+            "Выберите специализацию:",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Программирование", callback_data="set_spec_code")],
+                [InlineKeyboardButton("Маркетинг", callback_data="set_spec_marketing")],
+                [InlineKeyboardButton("➕ Добавить свою", callback_data="set_spec_custom")],
+                [InlineKeyboardButton("⬅ Назад", callback_data="settings")]
+            ])
+        )
+
+
+    # Настройки: сохранение выбора
+    elif data == "set_model_gpt4":
+        _user_settings[user_id]["model"] = "GPT‑4"
+        await query.edit_message_text("✅ Модель установлена: GPT‑4", reply_markup=_inline_settings_menu(user_id))
+
+    elif data == "set_model_gpt35":
+        _user_settings[user_id]["model"] = "GPT‑3.5"
+        await query.edit_message_text("✅ Модель установлена: GPT‑3.5", reply_markup=_inline_settings_menu(user_id))
+
+    elif data == "set_lang_ru":
+        _user_settings[user_id]["lang"] = "Русский"
+        await query.edit_message_text("✅ Язык установлен: Русский", reply_markup=_inline_settings_menu(user_id))
+
+    elif data == "set_lang_en":
+        _user_settings[user_id]["lang"] = "English"
+        await query.edit_message_text("✅ Language set: English", reply_markup=_inline_settings_menu(user_id))
+
+    elif data == "set_spec_code":
+        _user_settings[user_id]["spec"] = "Программирование"
+        await query.edit_message_text("✅ Специализация: Программирование", reply_markup=_inline_settings_menu(user_id))
+
+    elif data == "set_spec_marketing":
+        _user_settings[user_id]["spec"] = "Маркетинг"
+        await query.edit_message_text("✅ Специализация: Маркетинг", reply_markup=_inline_settings_menu(user_id))
+    
+    elif data == "set_spec_custom":
+        context.user_data["awaiting_custom_spec"] = True
+        await query.edit_message_text(
+            "✍️ Введите свою специализацию (например: «Финансовый анализ» или «UX-дизайн»):"
+        )  
+
+    else:
+        await query.answer("Неизвестная команда кнопки", show_alert=True)
+
+async def custom_spec_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    if context.user_data.get("awaiting_custom_spec"):
+        custom_spec = update.message.text.strip()
+        _user_settings[user_id]["spec"] = custom_spec
+        context.user_data["awaiting_custom_spec"] = False
+
+        await update.message.reply_text(
+            f"✅ Специализация установлена: <b>{custom_spec}</b>",
+            reply_markup=_inline_settings_menu(user_id),
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    # если не ждём ввод — передаём в чат с ИИ
+    await ai_chat_handler(update, context)
+
 
 def format_ai_response(text: str) -> str:
     # Markdown -> HTML для выделений
@@ -264,3 +355,4 @@ def register_handlers(app):
     app.add_handler(CommandHandler("menu", start_handler))  # открыть полное меню
     app.add_handler(CallbackQueryHandler(inline_menu_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, custom_spec_handler))
