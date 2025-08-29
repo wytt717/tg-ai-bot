@@ -1,7 +1,6 @@
 from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler, MessageHandler, filters
-from src.utils.access import deny_if_not_allowed
-from src.ai_providers.openai_compatible import ask_ai
+from src.ai_providers.openai_compatible import ask_ai, SYSTEM_PROMPT
 
 
 try:
@@ -9,15 +8,8 @@ try:
 except ImportError:
     user_memory = None
 
-try:
-    from src.utils.chunking import split_text
-except ImportError:
-    split_text = None
-
-
 from telegram.constants import ParseMode  # ✅ для HTML форматирования
 import re
-from telegram.constants import ParseMode
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler
@@ -97,6 +89,18 @@ async def ai_chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = update.message.text
     settings = _user_settings.get(user_id, {"model": "—", "lang": "—", "spec": "—"})
 
+    # --- Работа с памятью ---
+    context_data = None
+    if user_memory:
+        try:
+            # сохраняем текущее сообщение пользователя
+            user_memory.add_message(user_id, "user", prompt)
+            # достаём историю (например, последние 10 сообщений)
+            context_data = user_memory.get_context(user_id)
+        except Exception:
+            pass
+
+    # системные инструкции из настроек
     system_instructions = []
     if settings["model"] != "—":
         system_instructions.append(f"[Использовать модель: {settings['model']}]")
@@ -105,23 +109,43 @@ async def ai_chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if settings["spec"] != "—":
         system_instructions.append(f"[Специализация: {settings['spec']}]")
 
-    full_prompt = "\n".join(system_instructions) + f"\n\n{prompt}"
+    # --- Системный промпт для сохранения контекста ---
+
+    # --- Склеиваем историю в текст ---
+    history_text = ""
+    if context_data:
+        for msg in context_data:
+            role = "Пользователь" if msg["role"] == "user" else "ИИ"
+            history_text += f"{role}: {msg['content']}\n"
+
+    # --- Итоговый промпт ---
+    full_prompt = (
+        SYSTEM_PROMPT + "\n" +
+        "\n".join(system_instructions) +
+        "\n\nИстория диалога:\n" + history_text +
+        f"\nПользователь: {prompt}"
+    )
 
     try:
         ai_response = await ask_ai(full_prompt)
+
+        # --- Сохраняем ответ ассистента в память ---
+        if user_memory:
+            try:
+                user_memory.add_message(user_id, "assistant", ai_response)
+            except Exception:
+                pass
+
         ai_response = sanitize_text(ai_response, settings["lang"])
         formatted = format_ai_response(ai_response)
 
         ai_on = _user_ai_enabled.get(user_id, False)
-
         short_menu = InlineKeyboardMarkup([[
             InlineKeyboardButton(
                 f"🤖 {'Вкл' if ai_on else 'Выкл'} | {settings['model']} | {settings['lang']}",
                 callback_data="menu_open"
             )
         ]])
-
-        formatted = format_ai_response(ai_response)
 
         sent_msg = await update.message.reply_text(
             formatted,
@@ -193,9 +217,7 @@ def format_ai_response(text: str) -> str:
     text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
     text = re.sub(r"\*(.+?)\*", r"<i>\1</i>", text)
 
-    # Заголовки, кроме препроцессорных директив
-    header_exclude = r"(?!include|define|pragma|if|endif|else|elif)"
-    
+
 
 
     # Списки
